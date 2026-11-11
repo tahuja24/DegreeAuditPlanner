@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DegreePath – Degree Audit & Semester Planner</title>
+<style>
+:root{--bg:#f3f1ec;--card:#fffdf9;--tx:#1b2433;--mu:#5d6676;--bd:#d8d3c8;--ac:#1d3b6e;--acx:#fff;--bad:#b42318;--ok:#1c7a4a}
+@media(prefers-color-scheme:dark){:root{--bg:#0f141d;--card:#171e2b;--tx:#e6e9ef;--mu:#97a1b3;--bd:#2a3344;--ac:#8fb0ff;--acx:#0b1220;--bad:#ff9b8f;--ok:#6fd3a0}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+header,main{max-width:1180px;margin:0 auto;padding:18px 20px}
+h1{font:700 1.8rem/1.2 Georgia,serif;margin:0 0 4px}
+h3{font:600 .95rem Georgia,serif;margin:0 0 8px;display:flex;justify-content:space-between}
+.sub,small{color:var(--mu)}
+.sub{margin:0}
+small{display:block;font-size:12px}
+.box,.card,.sem{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}
+#status{padding:10px 14px;border-radius:8px;border:1px solid var(--bd);background:var(--card);margin-bottom:12px;font-weight:600}
+#status.ok{border-color:var(--ok);color:var(--ok)}
+#status.bad{border-color:var(--bad);color:var(--bad)}
+.cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}
+.card b{display:flex;justify-content:space-between;font-size:13px}
+.meter{height:6px;background:var(--bd);border-radius:3px;margin:6px 0;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--ac)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+.tabs{margin-left:auto;display:flex;gap:6px}
+button,select{font:inherit;padding:7px 12px;border-radius:6px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+button.p,button[aria-pressed=true]{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button:focus-visible,select:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.split{display:grid;gap:14px;grid-template-columns:290px 1fr;align-items:start}
+@media(max-width:820px){.split{grid-template-columns:1fr}}
+#cat{max-height:640px;overflow-y:auto}
+.sems{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(215px,1fr))}
+.sem{min-height:130px}
+.sem.over{border-color:var(--bad)}
+.course{background:var(--bg);border:1px solid var(--bd);border-left:5px solid var(--mu);border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:13px;cursor:grab;position:relative}
+.course.bad{border-color:var(--bad);border-left-color:var(--bad)}
+.course select{width:100%;margin-top:5px;padding:4px;font-size:12px}
+.err{color:var(--bad)}
+.x{position:absolute;top:2px;right:4px;border:0;background:none;padding:2px 6px;font-size:16px;color:var(--mu)}
+.empty{color:var(--mu);font-size:13px;margin:6px 0}
+.scroll{overflow-x:auto}
+.n{stroke-width:1.5}.n.u{fill:var(--card);stroke:var(--bd)}.n.g{fill:rgba(40,160,100,.22);stroke:var(--ok)}.n.b{fill:rgba(220,60,40,.22);stroke:var(--bad)}
+svg text{fill:var(--tx);font-size:11px}
+.leg{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--mu)}
+[hidden]{display:none!important}
+@media print{.bar,#cat{display:none}.split{display:block}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <h1>DegreePath</h1>
+  <p class="sub">Plan your semesters, check prerequisites and track graduation requirements. Demo programme: B.Tech Computer Science, 77 credits.</p>
+</header>
+<main>
+  <div id="status" role="status"></div>
+  <div id="audit" class="cards"></div>
+  <div class="bar">
+    <button class="p" id="auto">Auto-plan</button>
+    <button id="clear">Clear plan</button>
+    <button id="prt">Print</button>
+    <span class="tabs"><button id="t1" aria-pressed="true">Semester plan</button><button id="t2" aria-pressed="false">Prerequisite map</button></span>
+  </div>
+  <div id="planView" class="split">
+    <aside class="box" id="cat" aria-label="Course catalogue"></aside>
+    <section id="sems" class="sems"></section>
+  </div>
+  <div id="mapView" class="box" hidden>
+    <div class="scroll"><svg id="svg" role="img" aria-label="Prerequisite map"></svg></div>
+    <div class="leg"><span>Green: planned with no problems</span><span>Red: planned with a prerequisite problem</span><span>Plain: not planned yet</span><span>Arrows run from a prerequisite to the course that needs it</span></div>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const SEMS=8,MAXCR=21;
+const REQ={Math:16,Core:34,Capstone:6,Elective:12,"Gen Ed":9};
+const COL={Math:"#c27c0e",Core:"#2e6fd0",Capstone:"#8a4fd0",Elective:"#1c9a7a","Gen Ed":"#c2467a"};
+const C=[
+["MA101","Calculus I",4,"Math",[]],["MA102","Calculus II",4,"Math",["MA101"]],["MA201","Linear Algebra",4,"Math",["MA101"]],["MA202","Probability and Statistics",4,"Math",["MA102"]],
+["CS101","Introduction to Programming",4,"Core",[]],["CS102","Discrete Mathematics",3,"Core",[]],["CS201","Data Structures",4,"Core",["CS101"]],["CS202","Computer Organisation",3,"Core",["CS101"]],
+["CS203","Algorithms",4,"Core",["CS201","CS102"]],["CS301","Operating Systems",4,"Core",["CS201","CS202"]],["CS302","Databases",3,"Core",["CS201"]],["CS303","Computer Networks",3,"Core",["CS202"]],
+["CS304","Theory of Computation",3,"Core",["CS203"]],["CS305","Software Engineering",3,"Core",["CS201"]],
+["CS401","Capstone Project I",3,"Capstone",["CS305","CS302"]],["CS402","Capstone Project II",3,"Capstone",["CS401"]],
+["CS411","Machine Learning",3,"Elective",["MA202","CS203"]],["CS412","Web Development",3,"Elective",["CS302"]],["CS413","Cryptography",3,"Elective",["CS203","MA201"]],
+["CS414","Computer Graphics",3,"Elective",["MA201","CS201"]],["CS415","Distributed Systems",3,"Elective",["CS301","CS303"]],["CS416","Mobile App Development",3,"Elective",["CS201"]],
+["HU101","Communication Skills",3,"Gen Ed",[]],["HU102","Economics",3,"Gen Ed",[]],["HU201","Ethics in Technology",3,"Gen Ed",["HU101"]],["HU202","Entrepreneurship",3,"Gen Ed",["HU102"]]
+].map(a=>({code:a[0],name:a[1],cr:a[2],cat:a[3],pre:a[4]}));
+const by=Object.fromEntries(C.map(c=>[c.code,c]));
+let plan=null,filt="All";
+try{plan=JSON.parse(localStorage.getItem("dp-plan"))}catch(e){}
+
+const semCr=s=>Object.keys(plan).filter(k=>plan[k]===s).reduce((a,k)=>a+by[k].cr,0);
+function issues(k){
+  if(!plan[k])return[];
+  return by[k].pre.flatMap(p=>!plan[p]?[`Needs ${p}, which is not in your plan`]:plan[p]>=plan[k]?[`Needs ${p} in an earlier semester`]:[]);
+}
+const dm={};
+const depth=k=>dm[k]??=by[k].pre.length?1+Math.max(...by[k].pre.map(depth)):0;
+
+function auto(){
+  plan={};
+  const want=C.filter(c=>["Math","Core","Capstone"].includes(c.cat)).map(c=>c.code).concat(["CS411","CS412","CS414","CS416","HU101","HU102","HU201"]);
+  want.sort((a,b)=>depth(a)-depth(b));
+  want.forEach(k=>{
+    let s=Math.max(0,...by[k].pre.map(p=>plan[p]||0))+1;
+    while(s<=SEMS&&semCr(s)+by[k].cr>15)s++;
+    if(s<=SEMS)plan[k]=s;
+  });
+}
+
+function renderAudit(){
+  let probs=0;
+  Object.keys(plan).forEach(k=>{if(issues(k).length)probs++});
+  for(let s=1;s<=SEMS;s++)if(semCr(s)>MAXCR)probs++;
+  const rows=Object.keys(REQ).map(k=>({
+    k,req:REQ[k],
+    got:C.filter(c=>c.cat===k&&plan[c.code]).reduce((a,c)=>a+c.cr,0),
+    miss:(k==="Elective"||k==="Gen Ed")?0:C.filter(c=>c.cat===k&&!plan[c.code]).length
+  }));
+  const total=rows.reduce((a,r)=>a+r.got,0),all=Object.values(REQ).reduce((a,b)=>a+b,0);
+  const met=rows.every(r=>r.got>=r.req&&!r.miss);
+  const card=(k,got,req,note)=>`<div class="card"><b>${k}<span>${got}/${req} cr</span></b><div class="meter"><i style="width:${Math.min(100,got/req*100)}%"></i></div><small>${note}</small></div>`;
+  $("audit").innerHTML=rows.map(r=>card(r.k,r.got,r.req,r.miss?`${r.miss} required course${r.miss>1?"s":""} left`:r.got>=r.req?"Requirement met":`${r.req-r.got} cr to go`)).join("")+card("Total",total,all,total>=all?"All credits planned":`${all-total} cr unplanned`);
+  const st=$("status");
+  if(met&&!probs){st.className="ok";st.textContent="Your plan meets every graduation requirement."}
+  else if(probs){st.className="bad";st.textContent=`${probs} problem${probs>1?"s":""} to fix: check the red items in your plan.`}
+  else{st.className="";st.textContent="No problems so far. Keep adding courses to complete the requirements."}
+}
+
+function renderCat(){
+  const list=C.filter(c=>!plan[c.code]&&(filt==="All"||c.cat===filt));
+  const opts=Array.from({length:SEMS},(_,i)=>`<option value="${i+1}">Semester ${i+1}</option>`).join("");
+  $("cat").innerHTML=`<h3>Course catalogue <small>${list.length} left</small></h3><select id="filt" aria-label="Filter by category" style="width:100%;margin-bottom:8px">${["All",...Object.keys(REQ)].map(x=>`<option${x===filt?" selected":""}>${x}</option>`).join("")}</select>`+
+  (list.map(c=>`<div class="course" draggable="true" data-c="${c.code}" style="border-left-color:${COL[c.cat]}"><b>${c.code}</b> ${c.name}<small>${c.cr} cr · ${c.cat}${c.pre.length?" · needs "+c.pre.join(", "):""}</small><select data-add="${c.code}" aria-label="Add ${c.code} to a semester"><option value="">Add to semester…</option>${opts}</select></div>`).join("")||'<p class="empty">Everything in this category is planned.</p>');
+}
+
+function renderSems(){
+  let h="";
+  for(let s=1;s<=SEMS;s++){
+    const ks=Object.keys(plan).filter(k=>plan[k]===s).sort(),cr=semCr(s);
+    h+=`<div class="sem${cr>MAXCR?" over":""}" data-sem="${s}"><h3>Semester ${s}<small${cr>MAXCR?' class="err"':""}>${cr}/${MAXCR} cr</small></h3>`+
+    (cr>MAXCR?`<small class="err" style="margin-bottom:6px">Over the ${MAXCR}-credit limit</small>`:"")+
+    (ks.map(k=>{const c=by[k],is=issues(k);return `<div class="course${is.length?" bad":""}" draggable="true" data-c="${k}" style="border-left-color:${COL[c.cat]}"><button class="x" data-rm="${k}" aria-label="Remove ${k}">×</button><b>${k}</b> ${c.name}<small>${c.cr} cr</small>${is.map(i=>`<small class="err">${i}</small>`).join("")}</div>`}).join("")||'<p class="empty">Drop a course here</p>')+`</div>`;
+  }
+  $("sems").innerHTML=h;
+}
+
+function renderMap(){
+  const cols=[];
+  C.forEach(c=>(cols[depth(c.code)]??=[]).push(c.code));
+  const W=116,H=26,GX=70,GY=12,pos={};
+  cols.forEach((col,i)=>col.forEach((k,j)=>pos[k]={x:10+i*(W+GX),y:10+j*(H+GY)}));
+  const width=10+cols.length*(W+GX),height=10+Math.max(...cols.map(c=>c.length))*(H+GY);
+  let e="",n="";
+  C.forEach(c=>c.pre.forEach(p=>{
+    const a=pos[p],b=pos[c.code],ya=a.y+H/2,yb=b.y+H/2;
+    e+=`<path d="M${a.x+W} ${ya}C${a.x+W+35} ${ya} ${b.x-35} ${yb} ${b.x} ${yb}" fill="none" stroke="var(--mu)" stroke-opacity=".6"/>`;
+  }));
+  C.forEach(c=>{
+    const p=pos[c.code],st=!plan[c.code]?"u":issues(c.code).length?"b":"g";
+    n+=`<g><title>${c.name} (${c.cr} cr)${c.pre.length?" needs "+c.pre.join(", "):""}</title><rect class="n ${st}" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="5"/><text x="${p.x+W/2}" y="${p.y+17}" text-anchor="middle">${c.code}${plan[c.code]?" · Sem "+plan[c.code]:""}</text></g>`;
+  });
+  const svg=$("svg");
+  svg.setAttribute("viewBox",`0 0 ${width} ${height}`);
+  svg.style.width=width+"px";svg.style.height=height+"px";
+  svg.innerHTML=e+n;
+}
+
+function render(){
+  renderAudit();renderCat();renderSems();renderMap();
+  try{localStorage.setItem("dp-plan",JSON.stringify(plan))}catch(e){}
+}
+
+document.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.dataset.add!==undefined&&t.value){plan[t.dataset.add]=+t.value;render()}
+  else if(t.id==="filt"){filt=t.value;render()}
+});
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-rm]");
+  if(t){delete plan[t.dataset.rm];render()}
+});
+document.addEventListener("dragstart",e=>{
+  const t=e.target.closest&&e.target.closest(".course");
+  if(t)e.dataTransfer.setData("text/plain",t.dataset.c);
+});
+document.addEventListener("dragover",e=>{if(e.target.closest("[data-sem],#cat"))e.preventDefault()});
+document.addEventListener("drop",e=>{
+  const z=e.target.closest("[data-sem],#cat");
+  if(!z)return;
+  e.preventDefault();
+  const k=e.dataTransfer.getData("text/plain");
+  if(!by[k])return;
+  if(z.id==="cat")delete plan[k];else plan[k]=+z.dataset.sem;
+  render();
+});
+$("auto").onclick=()=>{auto();render()};
+$("clear").onclick=()=>{plan={};render()};
+$("prt").onclick=()=>window.print();
+function tab(map){
+  $("planView").hidden=map;$("mapView").hidden=!map;
+  $("t1").setAttribute("aria-pressed",!map);$("t2").setAttribute("aria-pressed",map);
+}
+$("t1").onclick=()=>tab(false);
+$("t2").onclick=()=>tab(true);
+
+if(!plan||typeof plan!=="object"||Array.isArray(plan)){plan={};auto()}
+render();
+</script>
+</body>
+</html>
